@@ -1,0 +1,411 @@
+
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bikaner Express - Shop Dashboard</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  font-family:Arial,sans-serif;
+  background:#fff8ed;
+  color:#382417;
+  margin:0;
+  padding:12px;
+}
+.panel{
+  max-width:650px;
+  margin:15px auto;
+  padding:18px;
+  background:white;
+  border-radius:14px;
+  box-shadow:0 4px 14px #0001;
+}
+h1{color:#a94313}
+input,button{
+  width:100%;
+  padding:12px;
+  margin:7px 0;
+  border-radius:8px;
+  font-size:16px;
+}
+input{border:1px solid #d8c8b8}
+button{
+  background:#a94313;
+  color:white;
+  border:0;
+  font-weight:bold;
+}
+button:disabled{opacity:.5}
+.secondary{background:#555}
+.green{background:#187a38}
+.order{
+  border:1px solid #e2cdbb;
+  padding:13px;
+  margin:12px 0;
+  border-radius:10px;
+  overflow-wrap:anywhere;
+}
+.order h3{color:#a94313}
+.status{font-weight:bold;color:#187a38}
+#dashboard{display:none}
+.message{font-size:14px}
+</style>
+</head>
+
+<body>
+
+<section class="panel" id="loginPanel">
+<h1>🥮 Bikaner Express</h1>
+<h2>Shop Login</h2>
+<p>अपनी Shop Email और Password से Login करें।</p>
+
+<form id="loginForm">
+<input id="email" type="email" placeholder="Shop Email" required>
+<input id="password" type="password" placeholder="Password" required>
+<button id="loginButton">Login</button>
+</form>
+
+<p id="message" class="message"></p>
+</section>
+
+<main class="panel" id="dashboard">
+<h1>🏪 Shop Dashboard</h1>
+
+<h3 id="shopName">Shop Loading...</h3>
+<p id="shopStatus"></p>
+
+<button id="availabilityButton">Loading...</button>
+<p id="availabilityMessage" class="message"></p>
+
+<hr>
+
+<h2>📦 मेरे ऑर्डर</h2>
+<p id="ordersMessage" class="message">ऑर्डर लोड हो रहे हैं...</p>
+<div id="ordersList"></div>
+
+<button id="logoutButton" class="secondary">Logout</button>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDhumnH7lRnz_LVJLTMklksusBPaDAkCh4",
+  authDomain: "bikaner-express-537a2.firebaseapp.com",
+  databaseURL: "https://bikaner-express-537a2-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "bikaner-express-537a2",
+  storageBucket: "bikaner-express-537a2.firebasestorage.app",
+  messagingSenderId: "852964791053",
+  appId: "1:852964791053:web:94c129e58b72a375661644"
+};
+
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+
+const auth = firebase.auth();
+const db = firebase.database();
+const $ = id => document.getElementById(id);
+
+let currentShopUid = null;
+let currentAvailability = "offline";
+let orderListener = null;
+
+function showMessage(id, text) {
+  $(id).textContent = text;
+}
+
+/* LOGIN */
+$("loginForm").addEventListener("submit", async function(e) {
+  e.preventDefault();
+
+  $("loginButton").disabled = true;
+  showMessage("message", "Login हो रहा है...");
+
+  try {
+    await auth.signInWithEmailAndPassword(
+      $("email").value.trim(),
+      $("password").value
+    );
+  } catch(error) {
+    showMessage("message", "Login Error: " + error.message);
+  } finally {
+    $("loginButton").disabled = false;
+  }
+});
+
+/* AUTH CHECK */
+auth.onAuthStateChanged(async user => {
+  stopOrderListener();
+
+  if (!user) {
+    currentShopUid = null;
+    $("dashboard").style.display = "none";
+    $("loginPanel").style.display = "block";
+    return;
+  }
+
+  await loadShop(user);
+});
+
+/* SHOP DETAILS */
+async function loadShop(user) {
+  try {
+    const snap = await db.ref("shops/" + user.uid).once("value");
+    const shop = snap.val();
+
+    if (
+      !shop ||
+      shop.approvalStatus !== "approved" ||
+      shop.accountStatus !== "active"
+    ) {
+      await auth.signOut();
+
+      showMessage(
+        "message",
+        !shop
+          ? "Shop का रिकॉर्ड नहीं मिला।"
+          : shop.approvalStatus !== "approved"
+          ? "Admin Approval अभी बाकी है।"
+          : "Shop Account बंद है।"
+      );
+      return;
+    }
+
+    currentShopUid = user.uid;
+    currentAvailability =
+      shop.availability === "online" ? "online" : "offline";
+
+    $("shopName").textContent =
+      "Shop: " + (shop.shopName || "Shop");
+
+    $("shopStatus").textContent =
+      "Account Status: " + shop.accountStatus;
+
+    updateAvailabilityButton();
+
+    $("loginPanel").style.display = "none";
+    $("dashboard").style.display = "block";
+
+    watchShopOrders(user.uid);
+
+  } catch(error) {
+    showMessage("message", "Shop Error: " + error.message);
+  }
+}
+
+/* ONLINE / OFFLINE */
+function updateAvailabilityButton() {
+  $("availabilityButton").textContent =
+    currentAvailability === "online"
+      ? "🟢 Online — Offline करें"
+      : "⚪ Offline — Online करें";
+}
+
+$("availabilityButton").addEventListener("click", async () => {
+  if (!currentShopUid || !auth.currentUser) return;
+
+  const next =
+    currentAvailability === "online" ? "offline" : "online";
+
+  $("availabilityButton").disabled = true;
+
+  try {
+    await db.ref(
+      "shops/" + currentShopUid + "/availability"
+    ).set(next);
+
+    currentAvailability = next;
+    updateAvailabilityButton();
+
+    showMessage(
+      "availabilityMessage",
+      next === "online"
+        ? "आपकी Shop Online है।"
+        : "आपकी Shop Offline है।"
+    );
+
+  } catch(error) {
+    showMessage(
+      "availabilityMessage",
+      "Status Save Error: " + error.message
+    );
+  } finally {
+    $("availabilityButton").disabled = false;
+  }
+});
+
+/* STOP OLD ORDER LISTENER */
+function stopOrderListener() {
+  if (orderListener) {
+    orderListener.off();
+    orderListener = null;
+  }
+}
+
+/* WATCH SHOP ORDERS */
+function watchShopOrders(shopUid) {
+  stopOrderListener();
+
+  orderListener = db.ref("shopOrders/" + shopUid);
+
+  orderListener.on("value", snapshot => {
+    const list = $("ordersList");
+    list.replaceChildren();
+
+    if (!snapshot.exists()) {
+      showMessage("ordersMessage", "अभी कोई ऑर्डर नहीं है।");
+      return;
+    }
+
+    let count = 0;
+
+    snapshot.forEach(child => {
+      const order = child.val() || {};
+      count++;
+
+      const card = document.createElement("div");
+      card.className = "order";
+
+      const title = document.createElement("h3");
+      title.textContent =
+        "Order: " + (order.orderId || child.key);
+      card.appendChild(title);
+
+      const items = document.createElement("p");
+      items.textContent =
+        "Items: " + getItemsText(order.items);
+      card.appendChild(items);
+
+      const total = document.createElement("p");
+      total.textContent = "Total: ₹" + (order.total || 0);
+      card.appendChild(total);
+
+      const status = document.createElement("p");
+      status.className = "status";
+      status.textContent =
+        "Status: " + (order.status || "New");
+      card.appendChild(status);
+
+      const delivery = document.createElement("p");
+      delivery.textContent =
+        "Delivery Status: " +
+        (order.deliveryStatus || "अभी अपडेट नहीं");
+      card.appendChild(delivery);
+
+      const currentStatus = String(order.status || "New");
+
+      if (currentStatus === "New" ||
+          currentStatus === "Assigned") {
+        addActionButton(
+          card, "Accept Order", "Accepted", child.key
+        );
+      } else if (currentStatus === "Accepted") {
+        addActionButton(
+          card, "Preparing", "Preparing", child.key
+        );
+      } else if (currentStatus === "Preparing") {
+        addActionButton(
+          card, "Packed", "Packed", child.key
+        );
+      } else if (currentStatus === "Packed") {
+        const done = document.createElement("p");
+        done.className = "status";
+        done.textContent = "✓ ऑर्डर पैक हो चुका है।";
+        card.appendChild(done);
+      }
+
+      list.appendChild(card);
+    });
+
+    showMessage(
+      "ordersMessage",
+      count + " ऑर्डर मिले।"
+    );
+
+  }, error => {
+    showMessage(
+      "ordersMessage",
+      "Orders Error: " + error.message
+    );
+  });
+}
+
+/* ITEM DETAILS */
+function getItemsText(items) {
+  if (!items) return "जानकारी उपलब्ध नहीं";
+
+  if (Array.isArray(items)) {
+    return items.map(item =>
+      typeof item === "string"
+        ? item
+        : (item.name || item.productName || "Item") +
+          " x " + (item.quantity || item.qty || 1)
+    ).join(", ");
+  }
+
+  if (typeof items === "object") {
+    return Object.entries(items).map(([name, item]) => {
+      if (typeof item === "number") {
+        return name + " x " + item;
+      }
+
+      return name + " x " +
+        ((item && (item.quantity || item.qty)) || 1);
+    }).join(", ");
+  }
+
+  return String(items);
+}
+
+/* ORDER STATUS BUTTON */
+function addActionButton(card, label, nextStatus, orderKey) {
+  const button = document.createElement("button");
+  button.textContent = label;
+
+  if (nextStatus === "Packed") {
+    button.className = "green";
+  }
+
+  button.addEventListener("click", async () => {
+    if (!currentShopUid || !auth.currentUser ||
+        auth.currentUser.uid !== currentShopUid) {
+      alert("Shop Login जरूरी है।");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Saving...";
+
+    try {
+      await db.ref(
+        "shopOrders/" + currentShopUid + "/" +
+        orderKey + "/status"
+      ).set(nextStatus);
+
+      alert("Order Status: " + nextStatus);
+
+    } catch(error) {
+      alert("Status Update Error: " + error.message);
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+
+  card.appendChild(button);
+}
+
+/* LOGOUT */
+$("logoutButton").addEventListener("click", async () => {
+  stopOrderListener();
+  await auth.signOut();
+});
+</script>
+
+</body>
+</html>
