@@ -1,0 +1,210 @@
+<!DOCTYPE html>  
+
+<html lang="hi">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Bikaner Express - Shop Registration</title>  
+<style>  
+body{font-family:Arial,sans-serif;background:#fff8ed;color:#382417;margin:0;padding:16px}.card{max-width:500px;margin:20px auto;padding:20px;background:white;border-radius:16px;box-shadow:0 4px 16px #0001}h1{color:#a94313}input,textarea,button{width:100%;box-sizing:border-box;padding:13px;margin-top:12px;border-radius:8px;font-size:16px}input,textarea{border:1px solid #d8c8b8;background:white}button{background:#a94313;color:white;border:0;font-weight:bold}button:disabled{opacity:.6}#message{white-space:pre-wrap;overflow-wrap:anywhere}.hint{font-size:14px;color:#65564a;line-height:1.5}  
+</style>
+  </head>
+  <body>
+    <div class="card">  
+<h1>🛍️ Bikaner Express</h1>
+      <h2>Shop Registration</h2>
+      <p>अपनी दुकान रजिस्टर करें। Admin की मंज़ूरी के बाद ही दुकान ऑर्डर ले सकेगी।</p>  
+<form id="shopForm">  
+<input id="ownerName" placeholder="दुकानदार का पूरा नाम" minlength="2" maxlength="80" required>  
+<input id="shopName" placeholder="दुकान का नाम" minlength="2" maxlength="100" required>  
+<input id="phone" type="tel" inputmode="numeric" placeholder="10 अंकों का मोबाइल नंबर" pattern="[6-9][0-9]{9}" maxlength="10" required>  
+<input id="email" type="email" placeholder="ईमेल पता" autocomplete="email" required>  
+<input id="password" type="password" placeholder="पासवर्ड (कम से कम 6 अक्षर)" minlength="6" autocomplete="new-password" required>  
+<textarea id="address" rows="3" placeholder="दुकान का पूरा पता" minlength="8" maxlength="300" required></textarea>  
+<h3>📍 दुकान की GPS लोकेशन</h3>
+  <p class="hint">दुकान पर खड़े होकर GPS बटन दबाएँ। नजदीकी दुकान चुनने के लिए यह जरूरी है।</p>  
+<button id="locationButton" type="button">दुकान की GPS लोकेशन लें</button>
+  <p id="locationText" class="hint">अभी लोकेशन नहीं मिली।</p>  
+<button id="submitButton" type="submit">Shop Register करें</button>
+</form>
+<p id="message" role="status" aria-live="polite"></p>
+
+<hr>
+
+<h2>📍 बाद में दुकान की GPS जोड़ें</h2>
+<p class="hint">पहले रजिस्ट्रेशन कर चुके हैं? दुकान पर पहुँचकर लॉगिन करें और GPS सेव करें।</p>
+
+<input id="loginEmail" type="email" placeholder="रजिस्ट्रेशन वाला ईमेल">
+<input id="loginPassword" type="password" placeholder="पासवर्ड">
+
+<button id="loginButton" type="button">लॉगिन करें</button>
+<p id="loginMessage" class="hint"></p>
+
+<button id="saveGpsButton" type="button" disabled>
+  मेरी दुकान की GPS लोकेशन सेव करें
+</button>
+<p id="gpsSaveMessage" class="hint">पहले लॉगिन करें।</p>
+</div>
+       
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js">
+  
+</script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+      
+      
+<script>  
+"use strict";  
+const firebaseConfig={apiKey:"AIzaSyDhumnH7lRnz_LVJLTMklksusBPaDAkCh4",authDomain:"bikaner-express-537a2.firebaseapp.com",databaseURL:"https://bikaner-express-537a2-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"bikaner-express-537a2",storageBucket:"bikaner-express-537a2.firebasestorage.app",messagingSenderId:"852964791053",appId:"1:852964791053:web:94c129e58b72a375661644"};  
+if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);  
+const auth=firebase.auth(),db=firebase.database(),form=document.getElementById("shopForm"),message=document.getElementById("message"),submitButton=document.getElementById("submitButton"),locationButton=document.getElementById("locationButton"),locationText=document.getElementById("locationText");  
+let shopLocation=null;  
+locationButton.addEventListener("click",()=>{  
+ if(!navigator.geolocation){locationText.textContent="इस browser में GPS उपलब्ध नहीं है।";return}  
+ locationButton.disabled=true;locationText.textContent="GPS लोकेशन मिल रही है...";  
+ navigator.geolocation.getCurrentPosition(p=>{shopLocation={latitude:Number(p.coords.latitude),longitude:Number(p.coords.longitude)};locationText.textContent="लोकेशन मिल गई: "+shopLocation.latitude.toFixed(6)+", "+shopLocation.longitude.toFixed(6);locationButton.disabled=false},  
+ e=>{shopLocation=null;locationButton.disabled=false;locationText.textContent=e.code===1?"Location permission दें और फिर कोशिश करें।":"GPS नहीं मिला। फोन की Location और browser permission जाँचें।"},{enableHighAccuracy:true,timeout:20000,maximumAge:0});  
+});  
+form.addEventListener("submit",async event=>{  
+ event.preventDefault();  
+ const ownerName=document.getElementById("ownerName").value.trim(),
+   shopName=document.getElementById("shopName").value.trim(),
+   phone=document.getElementById("phone").value.trim(),
+   email=document.getElementById("email").value.trim().toLowerCase(),
+   password=document.getElementById("password").value,
+   address=document.getElementById("address").value.trim();  
+ if(!/^[6-9][0-9]{9}$/.test(phone)){message.textContent="सही 10 अंकों का मोबाइल नंबर डालें।";
+                                    return}  
+ 
+ submitButton.disabled=true;
+  message.textContent="Registration हो रहा है...";  
+ try{  
+  const result=await auth.createUserWithEmailAndPassword(email,password),u=result.user;  
+  const shopData = {
+  uid: u.uid,
+  ownerName,
+  shopName,
+  phone,
+  email,
+  address,
+  approvalStatus: "pending",
+  accountStatus: "active",
+  availability: "offline",
+  createdAt: Date.now()
+};
+
+if (shopLocation) {
+  shopData.latitude = shopLocation.latitude;
+  shopData.longitude = shopLocation.longitude;
+}
+
+await db.ref("shops/" + u.uid).set(shopData); 
+  message.textContent="Registration सफल हुआ!\nAdmin की मंज़ूरी का इंतज़ार करें।\nदुकान अभी Offline है।";
+   form.reset();shopLocation=null;locationText.textContent="अभी लोकेशन नहीं मिली।";  
+ }catch(e){console.error(e);
+           message.textContent="Registration पूरा नहीं हुआ।\n"+(e.code==="auth/email-already-in-use"?"यह ईमेल पहले से रजिस्टर है।":e.code==="auth/weak-password"?"पासवर्ड कम से कम 6 अक्षर का रखें.":e.code==="PERMISSION_DENIED"||e.code==="permission_denied"?"Firebase Rules ने Shop रिकॉर्ड लिखने की अनुमति नहीं दी।":(e.message||"Internet, Firebase Authentication और Rules जाँचें।"))}  
+ finally{submitButton.disabled=false}  
+}); 
+
+  
+const loginButton = document.getElementById("loginButton");
+const saveGpsButton = document.getElementById("saveGpsButton");
+const loginMessage = document.getElementById("loginMessage");
+const gpsSaveMessage = document.getElementById("gpsSaveMessage");
+
+let loggedInShopUser = null;
+
+auth.onAuthStateChanged(user => {
+  loggedInShopUser = user || null;
+  saveGpsButton.disabled = !loggedInShopUser;
+
+  if (user) {
+    loginMessage.textContent =
+      "लॉगिन सफल है। दुकान पर जाकर GPS सेव करें।";
+  }
+});
+
+loginButton.addEventListener("click", async () => {
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+
+  if (!email || !password) {
+    loginMessage.textContent = "ईमेल और पासवर्ड भरें।";
+    return;
+  }
+
+  loginButton.disabled = true;
+  loginMessage.textContent = "लॉगिन हो रहा है...";
+
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    loginMessage.textContent = "लॉगिन सफल हुआ!";
+  } catch (error) {
+    loginMessage.textContent =
+      "लॉगिन नहीं हुआ। ईमेल और पासवर्ड जाँचें।";
+  } finally {
+    loginButton.disabled = false;
+  }
+});
+
+saveGpsButton.addEventListener("click", () => {
+  if (!loggedInShopUser) {
+    gpsSaveMessage.textContent = "पहले लॉगिन करें।";
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    gpsSaveMessage.textContent =
+      "इस ब्राउज़र में GPS उपलब्ध नहीं है।";
+    return;
+  }
+
+  saveGpsButton.disabled = true;
+  gpsSaveMessage.textContent = "GPS लोकेशन प्राप्त हो रही है...";
+
+  navigator.geolocation.getCurrentPosition(async position => {
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+
+    try {
+      const shopRef = db.ref("shops/" + loggedInShopUser.uid);
+      const snapshot = await shopRef.once("value");
+
+      if (!snapshot.exists()) {
+        gpsSaveMessage.textContent =
+          "इस खाते की दुकान की जानकारी नहीं मिली।";
+        return;
+      }
+
+      await shopRef.update({
+        latitude: latitude,
+        longitude: longitude,
+        locationUpdatedAt: Date.now()
+      });
+
+      gpsSaveMessage.textContent =
+        "GPS सेव हो गया: " +
+        latitude.toFixed(6) + ", " +
+        longitude.toFixed(6);
+    } catch (error) {
+      gpsSaveMessage.textContent =
+        "GPS सेव नहीं हुआ। Firebase Rules जाँचें।";
+    } finally {
+      saveGpsButton.disabled = false;
+    }
+  }, error => {
+    gpsSaveMessage.textContent =
+      error.code === 1
+        ? "Location permission दें और फिर कोशिश करें।"
+        : "GPS नहीं मिला। मोबाइल Location चालू करके कोशिश करें।";
+
+    saveGpsButton.disabled = false;
+  }, {
+    enableHighAccuracy: true,
+    timeout: 20000,
+    maximumAge: 0
+  });
+});
+
+</script>
+</body>
+</html>
